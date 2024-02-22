@@ -7,14 +7,14 @@
 
 // Setup settings
 const defaultSettings = {
-  hcaptcha_auto_open: true,
-  hcaptcha_auto_solve: true,
+  hcaptcha_auto_open: false,
+  hcaptcha_auto_solve: false,
   hcaptcha_click_delay_time: 300,
   hcaptcha_solve_delay_time: 3000,
   hcaptcha_reload_delay_time: 0,
 
   recaptcha_auto_open: false,
-  recaptcha_auto_solve: false,
+  recaptcha_auto_solve: true,
   recaptcha_click_delay_time: 300,
   recaptcha_solve_delay_time: 1000,
 };

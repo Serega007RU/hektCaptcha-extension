@@ -439,7 +439,6 @@ const overflowBoxes = (box, maxSize) => {
       .trim()
       .replace(/^(a|an)\s+/i, '')
       .toLowerCase()
-      .replace(' ', '_');
     label = normalizedLabel[label] || label;
 
     const subImages = [];
@@ -466,85 +465,66 @@ const overflowBoxes = (box, maxSize) => {
       }
     }
     if (subImages.length === 0) return;
+
+    const imageSize = 320;
+    // Initialize NMS
+    const nmsConfig = new ort.Tensor(
+      'float32',
+      new Float32Array([10, 0.35, 0.25])
+    );
+    const nms = await ort.InferenceSession.create(
+      chrome.runtime.getURL('models/nms-yolov5-det.ort')
+    );
+
     if (n === 3) {
-      const modelURL = `https://hekt-static.akmal.dev/recaptcha/${label}.ort`;
-      const fetchModel = await fetch(modelURL, { cache: 'no-cache' });
-      if (fetchModel.status !== 200) {
-        console.log('error getting model', fetchModel, label);
-        return reload();
-      }
-
       // Initialize recaptcha detection model
-      const modelBuffer = await fetchModel.arrayBuffer();
-      const classifierSession = await ort.InferenceSession.create(
-        Buffer.from(modelBuffer)
+      const session = await ort.InferenceSession.create(
+        chrome.runtime.getURL('models/recaptcha-detection.ort')
       );
 
-      const outputs = {};
-      for (let i = 0; i < subImages.length; i++) {
-        const subImage = subImages[i];
+      for (let idxImage = 0; idxImage < subImages.length; idxImage++) {
+        const subImage = subImages[idxImage];
 
-        // Resize image to 224x224 with bilinear interpolation
-        subImage.resize(224, 224, Jimp.RESIZE_BILINEAR);
+        const inputImage = subImage.resize(imageSize, imageSize);
+        const inputTensor = imageDataToTensor(
+          inputImage,
+          [1, 3, imageSize, imageSize],
+          false
+        );
 
-        // Convert image data to tensor
-        const input = imageDataToTensor(subImage, [1, 3, 224, 224]);
+        // YOLOv5 detector
+        const { output0 } = await session.run({ images: inputTensor });
 
-        // Feed feats to classifier
-        const classifierOutputs = await classifierSession.run({ input: input });
-        const output = classifierOutputs[classifierSession.outputNames[0]].data;
+        // NMS (Non-Maximum Suppression)
+        const nmsOutput = await nms.run({
+          detection: output0,
+          config: nmsConfig,
+        });
+        const selectedIdx = nmsOutput[nms.outputNames[0]];
 
-        // Find confidence score of output
-        const confidence = softmax(output);
-        outputs[i] = confidence[1];
-      }
+        for (let i = 0; i < selectedIdx.data.length; i++) {
+          const idx = selectedIdx.data[i];
+          const selectedData = output0.data.slice(
+            idx * output0.dims[2],
+            (idx + 1) * output0.dims[2]
+          );
 
-      // Sort outputs by confidence
-      const sortedOutputs = Object.keys(outputs).sort(
-        (a, b) => outputs[b] - outputs[a]
-      );
-
-      let possibleTrue = sortedOutputs.filter((idx) => outputs[idx] > 0.7);
-      if (![3, 4].includes(possibleTrue.length) && subImages.length === 9) {
-        // if confidence between 3rd and 4th is smaller than 0.025, then include 4th
-        possibleTrue = sortedOutputs.slice(0, 3);
-        if (
-          sortedOutputs.length > 3 &&
-          outputs[sortedOutputs[2]] - outputs[sortedOutputs[3]] < 0.025
-        ) {
-          possibleTrue = sortedOutputs.slice(0, 4);
+          const scores = selectedData.slice(5);
+          const score = Math.max(...scores);
+          const labelName = modelLabel[scores.indexOf(score)];
+          if (labelName === label) {
+            data[idxImage] = true;
+            break;
+          }
         }
-      } else if (
-        // Logic for 2nd try at hard recaptcha
-        [3, 4].includes(subImages.length) &&
-        possibleTrue.length === 0
-      ) {
-        possibleTrue = sortedOutputs.filter((idx) => outputs[idx] > 0.6);
       }
-      possibleTrue.forEach((idx) => (data[idx] = true));
     } else if (n === 4) {
-      const imageSize = 320;
-
-      const modelURL = `https://hekt-static.akmal.dev/recaptcha/yolov5-seg.ort`;
-      const fetchModel = await fetch(modelURL, { cache: 'no-cache' });
-      if (fetchModel.status !== 200) {
-        console.log('error getting model', fetchModel, label);
-        return reload();
-      }
-
-      // Initialize recaptcha detection model
-      const modelBuffer = await fetchModel.arrayBuffer();
-      const nmsConfig = new ort.Tensor(
-        'float32',
-        new Float32Array([10, 0.25, 0.1])
-      );
-      const [segmentation, mask, nms] = await Promise.all([
-        ort.InferenceSession.create(Buffer.from(modelBuffer)),
+      const [segmentation, mask] = await Promise.all([
         ort.InferenceSession.create(
-          chrome.runtime.getURL('models/mask-yolov5-seg.ort')
+          chrome.runtime.getURL('models/recaptcha-segmentation.ort')
         ),
         ort.InferenceSession.create(
-          chrome.runtime.getURL('models/nms-yolov5-det.ort')
+          chrome.runtime.getURL('models/mask-yolov5-seg.ort')
         ),
       ]);
 

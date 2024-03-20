@@ -467,18 +467,16 @@ const overflowBoxes = (box, maxSize) => {
     }
     if (subImages.length === 0) return;
     if (n === 3) {
-      const modelURL = `https://hekt-static.akmal.dev/recaptcha/${label}.ort`;
-      const fetchModel = await fetch(modelURL, { cache: 'no-cache' });
-      if (fetchModel.status !== 200) {
-        console.log('error getting model', fetchModel, label);
-        return reload();
-      }
 
       // Initialize recaptcha detection model
-      const modelBuffer = await fetchModel.arrayBuffer();
-      const classifierSession = await ort.InferenceSession.create(
-        Buffer.from(modelBuffer)
-      );
+      let classifierSession
+      const modelURL = chrome.runtime.getURL(`models/recaptcha/${label}.ort`)
+      try {
+        classifierSession = await ort.InferenceSession.create(modelURL);
+      } catch (error) {
+        console.log('error getting model', modelURL);
+        return reload();
+      }
 
       const outputs = {};
       for (let i = 0; i < subImages.length; i++) {
@@ -525,21 +523,15 @@ const overflowBoxes = (box, maxSize) => {
     } else if (n === 4) {
       const imageSize = 320;
 
-      const modelURL = `https://hekt-static.akmal.dev/recaptcha/yolov5-seg.ort`;
-      const fetchModel = await fetch(modelURL, { cache: 'no-cache' });
-      if (fetchModel.status !== 200) {
-        console.log('error getting model', fetchModel, label);
-        return reload();
-      }
-
       // Initialize recaptcha detection model
-      const modelBuffer = await fetchModel.arrayBuffer();
       const nmsConfig = new ort.Tensor(
         'float32',
         new Float32Array([10, 0.25, 0.1])
       );
       const [segmentation, mask, nms] = await Promise.all([
-        ort.InferenceSession.create(Buffer.from(modelBuffer)),
+        ort.InferenceSession.create(
+          chrome.runtime.getURL('models/recaptcha/yolov5-seg.ort')
+        ),
         ort.InferenceSession.create(
           chrome.runtime.getURL('models/mask-yolov5-seg.ort')
         ),
